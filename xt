@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# xboard-toolkit 主入口
+set -Eeuo pipefail
+
+XT_HOME="${XT_HOME:-/opt/xboard-toolkit}"
+[ -f "$XT_HOME/lib/common.sh" ] || { echo "找不到 $XT_HOME/lib/common.sh，请重新运行 bootstrap.sh" >&2; exit 1; }
+# shellcheck disable=SC1091
+. "$XT_HOME/lib/common.sh"
+xt_load_conf
+
+XT_VERSION=$(cat "$XT_HOME/VERSION" 2>/dev/null || echo "unknown")
+
+usage() {
+    cat <<EOF
+xboard-toolkit ${XT_VERSION}
+
+用法: xt <命令> [选项]
+
+命令:
+  prep                 系统准备（时间同步 / IPv6 / BBR / 文件描述符）
+  dest                 Reality 伪装域名检测，输出推荐结果
+  node                 安装或绑定 xboard-node（machine 模式）
+  doctor               一键体检，检查所有已知易错点
+  batch <子命令>       批量操作多台机器
+  update               更新工具箱自身
+  version              显示版本
+  help                 显示本帮助
+
+全局选项:
+  --dry-run            只显示将要做什么，不实际执行
+  --ref <tag|branch>   指定仓库版本（默认 ${XT_REF}）
+  --source <URL模板>   强制指定下载源，覆盖自动选择
+                       模板支持 %OWNER% %REPO% %REF% %PATH%
+
+配置文件: ${XT_CONF}（权限 600，可写入 PANEL_URL 等默认值）
+日志目录: ${XT_LOGDIR}
+
+示例:
+  xt prep
+  xt dest --samples 5
+  xt node --panel https://panel.example.com --token XXX --machine-id 3
+  xt doctor
+  xt batch deploy --list /root/deploy/nodes.txt
+EOF
+}
+
+# ---------- 解析全局选项 ----------
+ARGS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dry-run) XT_DRY_RUN=1; export XT_DRY_RUN; shift ;;
+        --ref)     XT_REF="$2"; export XT_REF; shift 2 ;;
+        --source)  XT_SOURCE="$2"; export XT_SOURCE; shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *)         ARGS+=("$1"); shift ;;
+    esac
+done
+set -- "${ARGS[@]:-}"
+
+CMD="${1:-help}"
+[ $# -gt 0 ] && shift || true
+
+case "$CMD" in
+    prep|dest|node|doctor|batch)
+        SCRIPT="$XT_HOME/cmd/${CMD}.sh"
+        [ -f "$SCRIPT" ] || die "缺少子命令脚本: $SCRIPT（试试 xt update）"
+        # shellcheck disable=SC1090
+        exec bash "$SCRIPT" "$@"
+        ;;
+    update)
+        exec bash "$XT_HOME/bootstrap.sh" --update "$@"
+        ;;
+    version)
+        echo "xboard-toolkit $XT_VERSION"
+        echo "安装目录: $XT_HOME"
+        echo "仓库版本: $XT_REF"
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        log_error "未知命令: $CMD"
+        echo
+        usage
+        exit 1
+        ;;
+esac
