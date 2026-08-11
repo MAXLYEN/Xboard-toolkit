@@ -23,6 +23,7 @@ bash /tmp/xt.sh
 | `xt doctor` | 一键体检，覆盖全部已知易错点 |
 | `xt batch` | 批量操作多台机器 |
 | `xt update` | 更新工具箱自身 |
+| `xt legacy` | 检测遗留代理程序（XrayR / x-ui 等），并可一键清理有端口冲突的 |
 | `xt clean` | 一键清理工具箱留下的一切，并在清理后自检 |
 
 全局选项：`--dry-run`、`--ref <tag|branch>`、`--source <URL模板>`

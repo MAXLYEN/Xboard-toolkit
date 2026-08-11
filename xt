@@ -21,6 +21,7 @@ xboard-toolkit ${XT_VERSION}
   dest                 Reality 伪装域名检测，输出推荐结果
   node                 安装或绑定 xboard-node（machine 模式）
   doctor               一键体检，检查所有已知易错点
+  legacy               检测并清理遗留代理程序（XrayR / x-ui 等）
   batch <子命令>       批量操作多台机器
   update               更新工具箱自身（--force 强制重装）
   clean                一键清理工具箱留下的一切（含清理后自检）
@@ -42,6 +43,8 @@ xboard-toolkit ${XT_VERSION}
   xt node --panel https://panel.example.com --token XXX --machine-id 3
   xt doctor
   xt batch deploy --list /root/deploy/nodes.txt
+  xt legacy
+  xt legacy --remove-conflicting
   xt clean --dry-run
   xt clean --revert-system
 EOF
@@ -64,7 +67,7 @@ CMD="${1:-help}"
 [ $# -gt 0 ] && shift || true
 
 case "$CMD" in
-    prep|dest|node|doctor|batch|clean)
+    prep|dest|node|doctor|batch|clean|legacy)
         SCRIPT="$XT_HOME/cmd/${CMD}.sh"
         [ -f "$SCRIPT" ] || die "缺少子命令脚本: $SCRIPT（试试 xt update）"
         # shellcheck disable=SC1090

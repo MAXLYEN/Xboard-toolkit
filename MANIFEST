@@ -9,4 +9,5 @@ cmd/dest.sh
 cmd/node.sh
 cmd/doctor.sh
 cmd/batch.sh
+cmd/legacy.sh
 cmd/clean.sh
