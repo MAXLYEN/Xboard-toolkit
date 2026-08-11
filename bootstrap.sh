@@ -137,18 +137,29 @@ if [ -d "$XT_HOME" ] && [ "$IS_UPDATE" = "1" ]; then
     OLD_VER=$(cat "$XT_HOME/VERSION" 2>/dev/null || echo "?")
     NEW_VER=$(cat "$STAGE/VERSION")
 
-    # 版本号相同也要确认本地文件齐全。只比版本号的话，
-    # 清单里新增的文件会永远装不上（本地 VERSION 已经是新的了）
+    # 不能只比版本号。忘记改 VERSION 是很容易犯的错，
+    # 那样改过的文件永远推不下去，而且现象是"提示已最新"，极具误导性。
+    # 文件都只有几十 KB，直接逐个比内容，谁变了更新谁。
     MISSING=0
+    CHANGED=0
     for f in "${MANIFEST[@]}"; do
-        [ -e "$XT_HOME/$f" ] || { MISSING=$((MISSING+1)); dim "本地缺少: $f"; }
+        if [ ! -e "$XT_HOME/$f" ]; then
+            MISSING=$((MISSING+1)); dim "新增: $f"
+        elif ! cmp -s "$STAGE/$f" "$XT_HOME/$f"; then
+            CHANGED=$((CHANGED+1)); dim "已变更: $f"
+        fi
     done
 
-    if [ "$OLD_VER" = "$NEW_VER" ] && [ "$MISSING" -eq 0 ] && [ "$FORCE" = "0" ]; then
-        ok "已是最新版本 $NEW_VER，文件齐全，无需更新"
+    if [ "$MISSING" -eq 0 ] && [ "$CHANGED" -eq 0 ] && [ "$FORCE" = "0" ]; then
+        ok "已是最新（$OLD_VER），所有文件内容一致，无需更新"
         exit 0
     fi
-    [ "$MISSING" -gt 0 ] && warn "本地缺少 $MISSING 个文件，强制重装"
+
+    [ "$MISSING" -gt 0 ] && info "新增 $MISSING 个文件"
+    [ "$CHANGED" -gt 0 ] && info "变更 $CHANGED 个文件"
+    if [ "$OLD_VER" = "$NEW_VER" ] && [ "$CHANGED" -gt 0 ]; then
+        warn "文件有变更但 VERSION 仍是 $NEW_VER —— 大概是忘了改版本号，本次仍会更新"
+    fi
     BAK="${XT_HOME}.bak.$(date +%Y%m%d%H%M%S)"
     cp -a "$XT_HOME" "$BAK"
     info "旧版本 $OLD_VER 已备份到 $BAK"
