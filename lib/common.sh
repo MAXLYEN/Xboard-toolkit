@@ -209,14 +209,27 @@ xt_save_conf_kv() {
 # /etc/security/limits.conf 只对 PAM 登录会话生效，systemd 服务完全不读它。
 # 想抬高守护进程的 NOFILE，必须用 drop-in。
 apply_nofile_dropin() {
-    local unit="${1:-xboard-node}" limit="${2:-65535}"
+    local unit="${1:-xboard-node}" limit="${2:-65535}" cur
     systemctl list-unit-files 2>/dev/null | grep -q "^${unit}.service" || return 0
+
+    # 关键：先看当前值。某些 unit 自带很高的 LimitNOFILE（实测 xboard-node
+    # 是 1048576），无脑写 65535 反而会把上限调低。
+    cur=$(svc_nofile "$unit")
+    if [ "$cur" = "unlimited" ]; then
+        log_ok "${unit} 的 NOFILE 为 unlimited，无需调整"
+        return 0
+    fi
+    if [ "$cur" != "-" ] && [ "$cur" -ge "$limit" ] 2>/dev/null; then
+        log_ok "${unit} 的 NOFILE 已是 ${cur}（≥ ${limit}），无需调整"
+        return 0
+    fi
+
     write_idempotent "/etc/systemd/system/${unit}.service.d/override.conf" \
 "[Service]
 LimitNOFILE=${limit}"
     run systemctl daemon-reload
     run systemctl restart "$unit" >/dev/null 2>&1 || true
-    log_ok "${unit} 的 NOFILE 已设为 ${limit}"
+    log_ok "${unit} 的 NOFILE 已从 ${cur} 提高到 ${limit}"
 }
 
 # 读取某个 systemd 服务进程实际生效的 NOFILE
