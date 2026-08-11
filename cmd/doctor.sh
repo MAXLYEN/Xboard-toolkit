@@ -109,11 +109,15 @@ if have xbctl; then
     fi
 
     # 主动扫一遍常见的老代理程序，它们和 xboard-node 抢端口
-    for svc in XrayR xrayr x-ui v2ray v2ray-core trojan hysteria; do
-        if systemctl is-active --quiet "$svc" 2>/dev/null; then
-            chk_warn "检测到 $svc 正在运行" "可能与 xboard-node 抢端口"
-        fi
+    LEGACY_FOUND=""
+    for svc in XrayR xrayr x-ui v2ray v2ray-core xray trojan trojan-go hysteria sing-box; do
+        systemctl is-active --quiet "$svc" 2>/dev/null && LEGACY_FOUND="$LEGACY_FOUND $svc"
     done
+    if [ -n "${LEGACY_FOUND// /}" ]; then
+        chk_warn "检测到遗留代理程序" "${LEGACY_FOUND# }"
+        log_dim "查看详情和端口冲突情况: xt legacy"
+        log_dim "一键清理有冲突的:        xt legacy --remove-conflicting"
+    fi
 else
     chk_warn "未安装 xboard-node" "面板机不装节点端是正常的"
 fi
