@@ -1,0 +1,12 @@
+# xboard-toolkit 文件清单
+# bootstrap.sh 按此清单下载。新增文件只要加一行，无需改 bootstrap 本身。
+VERSION
+MANIFEST
+xt
+lib/common.sh
+cmd/prep.sh
+cmd/dest.sh
+cmd/node.sh
+cmd/doctor.sh
+cmd/batch.sh
+cmd/clean.sh

@@ -22,7 +22,7 @@ xboard-toolkit ${XT_VERSION}
   node                 安装或绑定 xboard-node（machine 模式）
   doctor               一键体检，检查所有已知易错点
   batch <子命令>       批量操作多台机器
-  update               更新工具箱自身
+  update               更新工具箱自身（--force 强制重装）
   clean                一键清理工具箱留下的一切（含清理后自检）
   version              显示版本
   help                 显示本帮助
@@ -74,7 +74,18 @@ case "$CMD" in
         exec bash "$XT_HOME/cmd/clean.sh" "$@"
         ;;
     update)
-        exec bash "$XT_HOME/bootstrap.sh" --update "$@"
+        # 先把 bootstrap 自身也更新掉，再用新的那份执行更新。
+        # 否则清单逻辑的改动永远传播不下去——本地这份是旧的。
+        BOOT=$(mktemp)
+        BOOT_URL="https://raw.githubusercontent.com/${XT_REPO_OWNER}/${XT_REPO_NAME}/${XT_REF}/bootstrap.sh"
+        if curl -fsSL --connect-timeout 8 --max-time 60 -o "$BOOT" "$BOOT_URL" 2>/dev/null \
+           && [ -s "$BOOT" ] && bash -n "$BOOT" 2>/dev/null; then
+            exec bash "$BOOT" --update "$@"
+        else
+            log_warn "拉取最新 bootstrap 失败，改用本地副本"
+            rm -f "$BOOT"
+            exec bash "$XT_HOME/bootstrap.sh" --update "$@"
+        fi
         ;;
     version)
         echo "xboard-toolkit $XT_VERSION"

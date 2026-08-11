@@ -19,20 +19,18 @@ XT_HOME="${XT_HOME:-/opt/xboard-toolkit}"
 BIN_LINK="/usr/local/bin/xt"
 IS_UPDATE=0
 
-[ "${1:-}" = "--update" ] && IS_UPDATE=1
+for a in "$@"; do
+    case "$a" in
+        --update) IS_UPDATE=1 ;;
+        --force)  FORCE=1 ;;
+    esac
+done
 
-# 需要下载的文件清单
-MANIFEST=(
-    "VERSION"
-    "xt"
-    "lib/common.sh"
-    "cmd/prep.sh"
-    "cmd/dest.sh"
-    "cmd/node.sh"
-    "cmd/doctor.sh"
-    "cmd/batch.sh"
-    "cmd/clean.sh"
-)
+# 文件清单从仓库的 MANIFEST 拉取，不写死在这里。
+# 写死的话，新增文件永远装不上——本地这份 bootstrap 是旧的，
+# 它不知道仓库里多了什么（v1.1.0 的 clean.sh 就是这么丢的）。
+MANIFEST=()
+FORCE=0
 
 C_GRN=$'\033[32m'; C_YEL=$'\033[33m'; C_RED=$'\033[31m'
 C_BLU=$'\033[36m'; C_DIM=$'\033[2m'; C_RST=$'\033[0m'
@@ -113,6 +111,15 @@ probe_sources || die "所有下载源都不可用。可用 XT_SOURCE 手动指�
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 
+# 先取清单，再按清单下载
+if fetch_one "MANIFEST" "$STAGE/MANIFEST"; then
+    mapfile -t MANIFEST < <(grep -vE '^\s*(#|$)' "$STAGE/MANIFEST")
+    dim "清单: ${#MANIFEST[@]} 个文件"
+else
+    warn "仓库里没有 MANIFEST，回退到内置清单"
+    MANIFEST=(VERSION xt lib/common.sh cmd/prep.sh cmd/dest.sh cmd/node.sh cmd/doctor.sh cmd/batch.sh cmd/clean.sh)
+fi
+
 info "下载 ${#MANIFEST[@]} 个文件"
 FAILED=0
 for f in "${MANIFEST[@]}"; do
@@ -129,10 +136,19 @@ done
 if [ -d "$XT_HOME" ] && [ "$IS_UPDATE" = "1" ]; then
     OLD_VER=$(cat "$XT_HOME/VERSION" 2>/dev/null || echo "?")
     NEW_VER=$(cat "$STAGE/VERSION")
-    if [ "$OLD_VER" = "$NEW_VER" ]; then
-        ok "已是最新版本 $NEW_VER，无需更新"
+
+    # 版本号相同也要确认本地文件齐全。只比版本号的话，
+    # 清单里新增的文件会永远装不上（本地 VERSION 已经是新的了）
+    MISSING=0
+    for f in "${MANIFEST[@]}"; do
+        [ -e "$XT_HOME/$f" ] || { MISSING=$((MISSING+1)); dim "本地缺少: $f"; }
+    done
+
+    if [ "$OLD_VER" = "$NEW_VER" ] && [ "$MISSING" -eq 0 ] && [ "$FORCE" = "0" ]; then
+        ok "已是最新版本 $NEW_VER，文件齐全，无需更新"
         exit 0
     fi
+    [ "$MISSING" -gt 0 ] && warn "本地缺少 $MISSING 个文件，强制重装"
     BAK="${XT_HOME}.bak.$(date +%Y%m%d%H%M%S)"
     cp -a "$XT_HOME" "$BAK"
     info "旧版本 $OLD_VER 已备份到 $BAK"

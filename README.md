@@ -101,6 +101,10 @@ XT_REF=v1.0.0 bash /tmp/xt.sh
 xt update --ref v1.0.1            # 明确升级
 ```
 
+文件清单在仓库的 `MANIFEST` 里，`bootstrap.sh` 按它下载——新增文件只要往清单加一行。
+
+`xt update` 会先拉取最新的 `bootstrap.sh` 再执行，保证清单逻辑的改动能传播下去。版本号相同时还会校验本地文件是否齐全，缺文件会强制重装（`--force` 可无条件重装）。
+
 `bootstrap.sh` 会先把全部文件下载校验完，再动现有安装目录，且旧版本自动备份到 `/opt/xboard-toolkit.bak.<时间戳>`。
 
 ## 配置文件
