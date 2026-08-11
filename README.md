@@ -23,6 +23,7 @@ bash /tmp/xt.sh
 | `xt doctor` | 一键体检，覆盖全部已知易错点 |
 | `xt batch` | 批量操作多台机器 |
 | `xt update` | 更新工具箱自身 |
+| `xt clean` | 一键清理工具箱留下的一切，并在清理后自检 |
 
 全局选项：`--dry-run`、`--ref <tag|branch>`、`--source <URL模板>`
 
@@ -58,6 +59,20 @@ xt batch doctor                    # 汇总异常
 ```
 
 需先配好 SSH 免密：`ssh-copy-id root@主机`。
+
+## 卸载
+
+```bash
+xt clean --dry-run          # 先看会删什么
+xt clean                    # 删工具箱自己的文件
+xt clean --revert-system    # 连系统改动一起回退
+```
+
+默认**只删工具箱自己的文件**（安装目录、软链、配置、日志、备份），不动 IPv6 / BBR / limits.conf / chrony 这些系统设置——它们可能已经被别的东西依赖，静默回退比留着更危险。要一起回退就加 `--revert-system`。
+
+**全程不碰 xboard-node**，那是独立组件。清理后自检会确认它仍在运行。
+
+删完会逐项自检并报告，有残留返回非零码。
 
 ## 下载源
 

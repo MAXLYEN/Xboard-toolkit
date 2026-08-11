@@ -31,6 +31,7 @@ MANIFEST=(
     "cmd/node.sh"
     "cmd/doctor.sh"
     "cmd/batch.sh"
+    "cmd/clean.sh"
 )
 
 C_GRN=$'\033[32m'; C_YEL=$'\033[33m'; C_RED=$'\033[31m'
