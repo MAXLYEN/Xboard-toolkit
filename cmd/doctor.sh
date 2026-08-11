@@ -137,10 +137,17 @@ ufw_allows_port() {
 
 if have xbctl && have ufw; then
     UFW_STATUS=$(ufw status 2>/dev/null || true)
+    # 健康端口不参与"应该放行"的判断——它本来就不该对外开
+    HEALTH_PORT="${HEALTH_PORT:-65530}"
     for p in $PUB_PORTS; do
         [ -z "$p" ] && continue
+        [ "$p" = "$HEALTH_PORT" ] && continue
         ufw_allows_port "$p" || chk_warn "端口 $p 未在 ufw 放行" "节点端对外监听它"
     done
+
+    if grep -qw "$HEALTH_PORT" <<<"$PUB_PORTS" && ufw_allows_port "$HEALTH_PORT"; then
+        chk_fail "健康端口 $HEALTH_PORT 已对公网放行" "立即收回: ufw delete allow $HEALTH_PORT"
+    fi
 
     # 健康检查端口本应只绑回环。出现在对外列表里说明它绑到了 0.0.0.0，
     # 等于把内部接口摆在公网上，只靠防火墙兜底。
