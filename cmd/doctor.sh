@@ -45,9 +45,23 @@ log_step "网络"
 CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '?')
 [ "$CC" = "bbr" ] && chk_ok "拥塞控制" "$CC" || chk_warn "拥塞控制" "$CC（建议 bbr）"
 
-NOFILE=$(ulimit -n)
-[ "$NOFILE" -ge 65535 ] 2>/dev/null && chk_ok "文件描述符上限" "$NOFILE" \
-    || chk_warn "文件描述符上限" "$NOFILE（建议 65535）"
+# 当前 shell 的值只是参考。真正要紧的是守护进程实际生效的限制——
+# systemd 服务不读 /etc/security/limits.conf，得看 /proc/<pid>/limits
+SHELL_NOFILE=$(ulimit -n)
+if systemctl list-unit-files 2>/dev/null | grep -q '^xboard-node.service'; then
+    SVC_NOFILE=$(svc_nofile xboard-node)
+    if [ "$SVC_NOFILE" = "-" ]; then
+        chk_warn "节点端 NOFILE" "服务未运行，无法读取"
+    elif [ "$SVC_NOFILE" -ge 65535 ] 2>/dev/null; then
+        chk_ok "节点端 NOFILE" "$SVC_NOFILE"
+    else
+        chk_warn "节点端 NOFILE" "$SVC_NOFILE（建议 65535）→ xt prep"
+    fi
+    log_dim "登录会话 ulimit -n = $SHELL_NOFILE（与守护进程无关，仅供参考）"
+else
+    [ "$SHELL_NOFILE" -ge 65535 ] 2>/dev/null && chk_ok "文件描述符上限" "$SHELL_NOFILE" \
+        || chk_warn "文件描述符上限" "$SHELL_NOFILE（建议 65535）"
+fi
 
 # ---------- 节点端 ----------
 log_step "节点端"
@@ -64,12 +78,14 @@ if have xbctl; then
     echo
     xbctl list 2>/dev/null | sed 's/^/    /' || true
 
-    # 内核未启动时端口不监听，属正常
-    LISTEN=$(ss -tulnp 2>/dev/null | grep -c 'xboard-node' || true)
-    if [ "${LISTEN:-0}" -gt 0 ]; then
-        chk_ok "有入站端口在监听" "$LISTEN 个"
+    # 只统计对外监听。65530 健康检查端口绑在回环，不算也不该放行。
+    PUB_PORTS=$(ss -tulnp 2>/dev/null \
+        | awk '/xboard-node/ && $5 !~ /^(127\.0\.0\.1|\[::1\]):/ { n=split($5,a,":"); print a[n] }' \
+        | sort -un | tr '\n' ' ')
+    if [ -n "${PUB_PORTS// /}" ]; then
+        chk_ok "对外监听端口" "$PUB_PORTS"
     else
-        chk_warn "没有入站端口在监听" "节点无用户时内核不启动，属正常"
+        chk_warn "没有对外监听端口" "节点无用户时内核不启动，属正常"
     fi
 else
     chk_warn "未安装 xboard-node" "面板机不装节点端是正常的"
@@ -100,14 +116,17 @@ else
     chk_warn "未安装 ufw" "确认云厂商安全组已配置"
 fi
 
-# 节点端在监听但防火墙没放行的端口
+# 节点端对外监听、但防火墙没放行的端口
+# 注意只看非回环监听：健康检查端口 65530 绑在 127.0.0.1，本来就不该放行
 if have xbctl && have ufw; then
-    while read -r p; do
+    UFW_STATUS=$(ufw status 2>/dev/null || true)
+    for p in $PUB_PORTS; do
         [ -z "$p" ] && continue
-        if ! ufw status 2>/dev/null | grep -qE "^${p}(/tcp|/udp)?\s"; then
-            chk_warn "端口 $p 未在 ufw 放行" "节点端正在监听它"
+        if ! grep -qE "^${p}(/tcp|/udp)?[[:space:]]" <<<"$UFW_STATUS" \
+           && ! grep -qE "^[0-9]+:[0-9]+/(tcp|udp)" <<<"$UFW_STATUS"; then
+            chk_warn "端口 $p 未在 ufw 放行" "节点端对外监听它"
         fi
-    done < <(ss -tulnp 2>/dev/null | grep 'xboard-node' | grep -oE ':[0-9]+ ' | tr -d ': ' | sort -u)
+    done
 fi
 
 # Docker 会把 FORWARD 默认策略改成 DROP，DNAT 中转会被静默丢包

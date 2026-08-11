@@ -94,6 +94,10 @@ else
     rm -f "$INSTALLER"
 fi
 
+# ---------- 资源限制 ----------
+# systemd 不读 /etc/security/limits.conf，守护进程要单独设
+apply_nofile_dropin xboard-node 65535
+
 # ---------- 验证 ----------
 log_step "验证"
 [ "$XT_DRY_RUN" = "1" ] && { log_dim "[dry-run] 跳过验证"; exit 0; }

@@ -108,14 +108,20 @@ fi
 
 # ---------- 5. 文件描述符 ----------
 log_step "文件描述符上限"
+
+# 登录会话（PAM）
 if grep -q "xboard-toolkit" /etc/security/limits.conf 2>/dev/null; then
-    log_ok "已配置"
+    log_ok "limits.conf 已配置（登录会话）"
 else
     ensure_line /etc/security/limits.conf "# xboard-toolkit"
     ensure_line /etc/security/limits.conf "* soft nofile 65535"
     ensure_line /etc/security/limits.conf "* hard nofile 65535"
-    log_ok "已设为 65535（默认 1024，高并发时会 too many open files）"
+    log_ok "limits.conf 已设为 65535（对登录会话生效）"
 fi
+
+# 守护进程：systemd 不读 limits.conf，必须单独下 drop-in
+apply_nofile_dropin xboard-node 65535
+log_dim "limits.conf 只管登录会话，systemd 服务要靠 drop-in —— 两处都要设"
 
 echo
 log_ok "系统准备完成。下一步：xt dest 选伪装域名，或 xt node 装节点端"
