@@ -117,16 +117,36 @@ else
 fi
 
 # 节点端对外监听、但防火墙没放行的端口
-# 注意只看非回环监听：健康检查端口 65530 绑在 127.0.0.1，本来就不该放行
+# ufw 规则里既有单端口也有 10000:11000 这种范围，两种都要能匹配
+ufw_allows_port() {
+    local port="$1" spec lo hi
+    while read -r spec _; do
+        spec="${spec%%/*}"
+        case "$spec" in
+            *:*)
+                lo="${spec%%:*}"; hi="${spec##*:}"
+                [ "$port" -ge "$lo" ] 2>/dev/null && [ "$port" -le "$hi" ] 2>/dev/null && return 0
+                ;;
+            [0-9]*)
+                [ "$spec" = "$port" ] && return 0
+                ;;
+        esac
+    done < <(grep -E '^[0-9]' <<<"$UFW_STATUS")
+    return 1
+}
+
 if have xbctl && have ufw; then
     UFW_STATUS=$(ufw status 2>/dev/null || true)
     for p in $PUB_PORTS; do
         [ -z "$p" ] && continue
-        if ! grep -qE "^${p}(/tcp|/udp)?[[:space:]]" <<<"$UFW_STATUS" \
-           && ! grep -qE "^[0-9]+:[0-9]+/(tcp|udp)" <<<"$UFW_STATUS"; then
-            chk_warn "端口 $p 未在 ufw 放行" "节点端对外监听它"
-        fi
+        ufw_allows_port "$p" || chk_warn "端口 $p 未在 ufw 放行" "节点端对外监听它"
     done
+
+    # 健康检查端口本应只绑回环。出现在对外列表里说明它绑到了 0.0.0.0，
+    # 等于把内部接口摆在公网上，只靠防火墙兜底。
+    if grep -qw "65530" <<<"$PUB_PORTS"; then
+        chk_warn "健康端口 65530 绑在公网地址" "应只绑 127.0.0.1，确认 ufw 未放行它"
+    fi
 fi
 
 # Docker 会把 FORWARD 默认策略改成 DROP，DNAT 中转会被静默丢包
