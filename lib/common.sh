@@ -205,6 +205,28 @@ xt_save_conf_kv() {
     fi
 }
 
+# ---------- systemd 资源限制 ----------
+# /etc/security/limits.conf 只对 PAM 登录会话生效，systemd 服务完全不读它。
+# 想抬高守护进程的 NOFILE，必须用 drop-in。
+apply_nofile_dropin() {
+    local unit="${1:-xboard-node}" limit="${2:-65535}"
+    systemctl list-unit-files 2>/dev/null | grep -q "^${unit}.service" || return 0
+    write_idempotent "/etc/systemd/system/${unit}.service.d/override.conf" \
+"[Service]
+LimitNOFILE=${limit}"
+    run systemctl daemon-reload
+    run systemctl restart "$unit" >/dev/null 2>&1 || true
+    log_ok "${unit} 的 NOFILE 已设为 ${limit}"
+}
+
+# 读取某个 systemd 服务进程实际生效的 NOFILE
+svc_nofile() {
+    local unit="${1:-xboard-node}" pid
+    pid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null || echo 0)
+    [ "${pid:-0}" -gt 0 ] 2>/dev/null || { echo "-"; return; }
+    awk '/Max open files/{print $4}' "/proc/$pid/limits" 2>/dev/null || echo "-"
+}
+
 # ---------- 错误定位 ----------
 xt_enable_traps() {
     set -Eeuo pipefail
