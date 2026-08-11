@@ -82,11 +82,38 @@ if have xbctl; then
     PUB_PORTS=$(ss -tulnp 2>/dev/null \
         | awk '/xboard-node/ && $5 !~ /^(127\.0\.0\.1|\[::1\]):/ { n=split($5,a,":"); print a[n] }' \
         | sort -un | tr '\n' ' ')
-    if [ -n "${PUB_PORTS// /}" ]; then
-        chk_ok "对外监听端口" "$PUB_PORTS"
+    HEALTH_PORT="${HEALTH_PORT:-65530}"
+    NODE_PORTS=$(tr ' ' '\n' <<<"$PUB_PORTS" | grep -v "^${HEALTH_PORT}$" | tr '\n' ' ')
+    if [ -n "${NODE_PORTS// /}" ]; then
+        chk_ok "节点入站端口" "$NODE_PORTS"
     else
-        chk_warn "没有对外监听端口" "节点无用户时内核不启动，属正常"
+        chk_warn "没有节点入站端口在监听" "节点无用户时内核不启动；也可能是启动失败，见下"
     fi
+    # 内核启动失败是最常见的"节点在线但连不上"根因，日志里翻出来
+    KERR=$(journalctl -u xboard-node --since "1 hour ago" --no-pager 2>/dev/null \
+           | grep -E "failed to start kernel|machine node exited with error" | tail -3)
+    if [ -n "$KERR" ]; then
+        chk_fail "内核启动失败" "最近 1 小时内有报错"
+        sed 's/^/      /' <<<"$KERR"
+
+        # 端口被占是其中最常见的一种，直接指出是谁占的
+        BUSY=$(grep -oE "listen tcp [0-9.]*:[0-9]+: bind: address already in use" <<<"$KERR" \
+               | grep -oE ':[0-9]+:' | tr -d ':' | head -1)
+        if [ -n "$BUSY" ]; then
+            OCC=$(ss -tulnp 2>/dev/null | awk -v p=":$BUSY" '$5 ~ p"$" {print}' | head -1)
+            echo
+            chk_fail "端口 $BUSY 被占用" "$(grep -oE 'users:\(\("[^"]+"' <<<"$OCC" | grep -oE '"[^"]+"' | tr -d '\"')"
+            sed 's/^/      /' <<<"$OCC"
+            log_dim "常见占用者: XrayR / x-ui / v2ray / 独立 sing-box —— 停掉它或给节点换端口"
+        fi
+    fi
+
+    # 主动扫一遍常见的老代理程序，它们和 xboard-node 抢端口
+    for svc in XrayR xrayr x-ui v2ray v2ray-core trojan hysteria; do
+        if systemctl is-active --quiet "$svc" 2>/dev/null; then
+            chk_warn "检测到 $svc 正在运行" "可能与 xboard-node 抢端口"
+        fi
+    done
 else
     chk_warn "未安装 xboard-node" "面板机不装节点端是正常的"
 fi
