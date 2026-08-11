@@ -135,6 +135,14 @@ if [ -d "$XT_HOME" ] && [ "$IS_UPDATE" = "1" ]; then
     BAK="${XT_HOME}.bak.$(date +%Y%m%d%H%M%S)"
     cp -a "$XT_HOME" "$BAK"
     info "旧版本 $OLD_VER 已备份到 $BAK"
+
+    # 只保留最近 KEEP 份，其余自动清理（工具箱才几十 KB，留太多没意义）
+    KEEP="${XT_BACKUP_KEEP:-3}"
+    mapfile -t OLD_BAKS < <(ls -1dt "${XT_HOME}".bak.* 2>/dev/null | tail -n +$((KEEP+1)))
+    if [ "${#OLD_BAKS[@]}" -gt 0 ]; then
+        for b in "${OLD_BAKS[@]}"; do rm -rf "$b"; done
+        info "已清理 ${#OLD_BAKS[@]} 份过期备份（保留最近 $KEEP 份）"
+    fi
 fi
 
 mkdir -p "$XT_HOME"
