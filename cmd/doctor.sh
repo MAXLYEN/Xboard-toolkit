@@ -194,6 +194,99 @@ if have docker && have iptables; then
     fi
 fi
 
+# ---------- 备份（面板机） ----------
+# 只在检测到备份脚本时才跑。节点机没有这些文件，整节自动跳过。
+BK_SCRIPTS=()
+for f in ${XT_BACKUP_SCRIPTS:-/usr/local/bin/vw-fullbackup.sh /usr/local/bin/xboard-fullbackup.sh}; do
+    [ -f "$f" ] && BK_SCRIPTS+=("$f")
+done
+
+if [ "${#BK_SCRIPTS[@]}" -gt 0 ]; then
+    log_step "备份"
+    CRON=$(crontab -l 2>/dev/null | grep -vE '^\s*#')
+    LOCKS=""
+
+    for f in "${BK_SCRIPTS[@]}"; do
+        NAME=$(basename "$f")
+        LINE=$(grep -F "$f" <<<"$CRON" | head -1)
+
+        # 日志时间戳若在脚本启动时一次性生成，整份日志时间相同，无法定位是哪一步变慢
+        if grep -qE '^[A-Z_]*LOGPREFIX=' "$f" && grep -qE 'printf.*\$\{?LOGPREFIX' "$f"; then
+            chk_warn "$NAME 日志时间戳被冻结" "log/warn/fail 应各自实时取 date，而非复用启动时的变量"
+        fi
+
+        if [ -z "$LINE" ]; then
+            chk_fail "$NAME 未进 crontab" "脚本装了但没人调度它"
+            continue
+        fi
+
+        if ! grep -q 'flock' <<<"$LINE"; then
+            chk_warn "$NAME 无并发锁" "多个备份同时跑会抢磁盘和带宽"
+        elif grep -qE 'flock +(-[a-zA-Z]+ +)*-n( |$)' <<<"$LINE"; then
+            # -n 拿不到锁就直接退出，脚本压根没启动，也就不会发告警邮件。
+            # 静默漏备份比任务撞车危险得多，应改成 -w <秒数> 排队等待。
+            chk_warn "$NAME 用的是 flock -n" "拿不到锁会静默跳过当天备份，建议改 -w 3600"
+        else
+            chk_ok "$NAME 定时与锁" "$(grep -oE 'flock +-w +[0-9]+' <<<"$LINE")"
+        fi
+
+        LK=$(grep -oE '/[^ ]*\.lock' <<<"$LINE" | head -1)
+        [ -n "$LK" ] && LOCKS="$LOCKS $LK"
+
+        # 装了 msmtp-mta 的机器上，cron 的任何输出都会被当邮件发给收不到的 root@主机名
+        grep -q '>>' <<<"$LINE" || chk_warn "$NAME cron 未重定向输出" "有 msmtp-mta 时会变成发不出去的邮件"
+
+    done
+
+    # 两个脚本各拿各的锁等于没上锁
+    UNIQ_LOCKS=$(tr ' ' '\n' <<<"$LOCKS" | sed '/^$/d' | sort -u | wc -l)
+    if [ "${#BK_SCRIPTS[@]}" -gt 1 ] && [ "$UNIQ_LOCKS" -gt 1 ]; then
+        chk_warn "各备份脚本锁文件不同" "应共用同一个 .lock 才能真正互斥"
+    fi
+
+    # 最新包的年龄——备份"跑过"和"最近跑过"是两回事
+    for d in ${XT_BACKUP_DIRS:-/box/vaul_bak /box/xboard_bak}; do
+        [ -d "$d" ] || continue
+        LATEST=$(ls -t "$d"/*.7z 2>/dev/null | head -1)
+        if [ -z "$LATEST" ]; then
+            chk_fail "$d 无备份包"
+            continue
+        fi
+        AGE_H=$(( ( $(date +%s) - $(stat -c %Y "$LATEST") ) / 3600 ))
+        SZ=$(du -h "$LATEST" | cut -f1)
+        if   [ "$AGE_H" -le 36 ];  then chk_ok   "$(basename "$d") 最新包" "${AGE_H}h 前, $SZ"
+        elif [ "$AGE_H" -le 168 ]; then chk_warn "$(basename "$d") 最新包已 ${AGE_H}h" "超过一天没产出新包"
+        else                            chk_fail "$(basename "$d") 最新包已 $((AGE_H/24))d" "备份很可能已经停了"
+        fi
+    done
+
+    # 加密密码文件：丢了等于所有包都打不开
+    PASSF="${XT_BACKUP_PASSFILE:-/root/.vw_backup_pass}"
+    if [ -f "$PASSF" ]; then
+        PERM=$(stat -c %a "$PASSF")
+        PLEN=$(wc -c < "$PASSF" | tr -d ' ')
+        [ "$PERM" = "600" ] || chk_warn "$PASSF 权限 $PERM" "应为 600"
+        [ "$PLEN" -ge 16 ] && chk_ok "备份加密密码" "已就位" \
+                           || chk_warn "备份加密密码偏短" "${PLEN} 字符，建议 ≥16"
+        log_dim "确认这个密码已离线抄写——文件丢了，云端所有包都是废的"
+    else
+        chk_fail "缺少加密密码文件" "$PASSF"
+    fi
+
+    # 云端 remote 是否还在（token 过期是最常见的静默失效）
+    if have rclone; then
+        RMTS=$(rclone listremotes 2>/dev/null | tr -d ':' | tr '\n' ' ')
+        if [ -n "${RMTS// /}" ]; then
+            chk_ok "rclone remote" "${RMTS% }"
+            log_dim "只验证了配置存在。真正的连通性看备份日志里的\"校验通过\""
+        else
+            chk_fail "rclone 未配置任何 remote" "云端备份不会生效"
+        fi
+    else
+        chk_warn "未安装 rclone" "备份将只留本地"
+    fi
+fi
+
 # ---------- 汇总 ----------
 echo
 printf '%s══ 汇总 ══%s  通过 %s%d%s  警告 %s%d%s  失败 %s%d%s\n' \
