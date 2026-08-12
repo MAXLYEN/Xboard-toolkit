@@ -20,7 +20,7 @@ bash /tmp/xt.sh
 | `xt prep` | 系统准备：时间同步、IPv6、BBR、文件描述符 |
 | `xt dest` | Reality 伪装域名检测，按延迟+抖动+类型打分推荐一个 |
 | `xt node` | 安装/绑定 xboard-node（machine 模式），幂等 |
-| `xt doctor` | 一键体检，覆盖全部已知易错点 |
+| `xt doctor` | 一键体检，覆盖全部已知易错点（面板机上额外体检备份） |
 | `xt batch` | 批量操作多台机器 |
 | `xt update` | 更新工具箱自身 |
 | `xt legacy` | 检测遗留代理程序（XrayR / x-ui 等），并可一键清理有端口冲突的 |
@@ -129,3 +129,19 @@ XT_REF="main"
 ## 许可
 
 MIT
+
+### 备份体检（仅面板机）
+
+`xt doctor` 检测到 `vw-fullbackup.sh` / `xboard-fullbackup.sh` 时会自动多跑一段，节点机上整段跳过。检查项：
+
+- 脚本是否进了 crontab，是否带并发锁
+- 锁用的是 `-n` 还是 `-w`（`-n` 拿不到锁会**静默跳过当天备份**且不告警，应改 `-w 3600`）
+- 多个脚本是否共用同一个 `.lock`（各拿各的等于没上锁）
+- cron 行是否重定向输出（装了 `msmtp-mta` 时不重定向会变成发不出去的邮件）
+- 脚本日志时间戳是否被冻结（启动时取一次 `date` 存进变量，会导致整份日志时间相同，无法定位哪一步变慢）
+- 本地最新包的年龄和体积（>36h 警告，>7d 判失败）
+- 加密密码文件是否存在、权限 600、长度 ≥16
+- rclone 是否配了 remote
+
+路径可在 `/etc/xboard-toolkit.conf` 里覆盖：`XT_BACKUP_SCRIPTS`、`XT_BACKUP_DIRS`、`XT_BACKUP_PASSFILE`。
+
